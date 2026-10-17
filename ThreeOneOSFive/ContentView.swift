@@ -1077,87 +1077,115 @@ struct CompactSkinCard: View {
     let onToggleExpand: () -> Void
     let onAction: () -> Void
     
-    var body: some View {
-        VStack(spacing: 0) {
-            // Main Top Row
-            HStack(spacing: 14) {
-                SkinThumbnailView(imageName: skin.imageName, size: 70)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(skin.name)
-                            .font(.headline.weight(.heavy))
-                            .foregroundStyle(.white)
-                        
-                        if isApplied {
-                            Text("ACTIVE")
-                                .font(.system(size: 10, weight: .black))
-                                .foregroundStyle(Color.green)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.18))
-                                .clipShape(Capsule())
-                        }
-                    }
+    @ViewBuilder
+    private var activeBadge: some View {
+        if isApplied {
+            Text("ACTIVE")
+                .font(.system(size: 10, weight: .black))
+                .foregroundStyle(Color.green)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.green.opacity(0.18))
+                .clipShape(Capsule())
+        }
+    }
+    
+    @ViewBuilder
+    private var actionButtonBackground: some View {
+        if isApplied {
+            Color.red.opacity(0.85)
+        } else {
+            AppTheme.gradient
+        }
+    }
+    
+    private var actionButton: some View {
+        Button(action: onAction) {
+            HStack {
+                if isProcessing {
+                    ProgressView().tint(.white)
+                    Text("Checking Container...")
+                        .font(.subheadline.weight(.bold))
+                } else {
+                    Image(systemName: isApplied ? "trash.fill" : "arrow.down.circle.fill")
+                    Text(isApplied ? "REMOVE SKIN" : "APPLY SKIN")
+                        .font(.subheadline.weight(.heavy))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(actionButtonBackground)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .disabled(isProcessing)
+    }
+    
+    private var headerRow: some View {
+        HStack(spacing: 14) {
+            SkinThumbnailView(imageName: skin.imageName, size: 70)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(skin.name)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(.white)
                     
-                    Text("Target: \(skin.characterName)")
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.accentSecondary)
-                    
-                    Text(skin.patchFileName)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    activeBadge
                 }
                 
-                Spacer()
+                Text("Target: \(skin.characterName)")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.accentSecondary)
                 
-                Button(action: onToggleExpand) {
-                    Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(AppTheme.accent)
-                }
+                Text(skin.patchFileName)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            Button(action: onToggleExpand) {
+                Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .padding(14)
+    }
+    
+    @ViewBuilder
+    private var expandedSection: some View {
+        if isExpanded {
+            Divider().background(AppTheme.cardBorder)
+            
+            VStack(alignment: .leading, spacing: 14) {
+                Text(skin.description)
+                    .font(.caption)
+                    .foregroundStyle(Color.gray)
+                    .lineSpacing(2)
+                
+                actionButton
             }
             .padding(14)
-            
-            // Expandable details & action
-            if isExpanded {
-                Divider().background(AppTheme.cardBorder)
-                
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(skin.description)
-                        .font(.caption)
-                        .foregroundStyle(Color(.lightGray))
-                        .lineSpacing(2)
-                    
-                    Button(action: onAction) {
-                        HStack {
-                            if isProcessing {
-                                ProgressView().tint(.white)
-                                Text("Checking Container...")
-                                    .font(.subheadline.weight(.bold))
-                            } else {
-                                Image(systemName: isApplied ? "trash.fill" : "arrow.down.circle.fill")
-                                Text(isApplied ? "REMOVE SKIN" : "APPLY SKIN")
-                                    .font(.subheadline.weight(.heavy))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(isApplied ? Color.red.opacity(0.85) : AppTheme.gradient)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .disabled(isProcessing)
-                }
-                .padding(14)
-                .background(Color.black.opacity(0.25))
-            }
+            .background(Color.black.opacity(0.25))
+        }
+    }
+    
+    private var borderStrokeColor: Color {
+        isApplied ? Color.green.opacity(0.5) : AppTheme.cardBorder
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            headerRow
+            expandedSection
         }
         .background(AppTheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(isApplied ? Color.green.opacity(0.5) : AppTheme.cardBorder, lineWidth: 1.5)
+                .strokeBorder(borderStrokeColor, lineWidth: 1.5)
         )
     }
 }

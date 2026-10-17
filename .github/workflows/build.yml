@@ -59,6 +59,8 @@ jobs:
             archive 2>&1 | tee build/logs/xcodebuild.log || {
               EXIT_CODE=$?
               echo "::error::xcodebuild archive failed with exit code $EXIT_CODE"
+              echo "=== Extracted Compiler Errors ==="
+              grep -E "error:" build/logs/xcodebuild.log || true
               echo "=== Failure log summary (last 100 lines) ==="
               tail -n 100 build/logs/xcodebuild.log
               exit $EXIT_CODE
