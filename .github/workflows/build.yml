@@ -19,8 +19,8 @@ jobs:
 
       - name: Select Xcode Version
         run: |
-          echo "=== Installed Xcode Applications ==="
-          ls -d /Applications/Xcode* || true
+          echo "=== Available Xcode Versions ==="
+          ls -d /Applications/Xcode* 2>/dev/null || true
           if [ -d "/Applications/Xcode_15.4.app" ]; then
             sudo xcode-select -switch /Applications/Xcode_15.4.app
           elif [ -d "/Applications/Xcode_16.0.app" ]; then
@@ -35,36 +35,84 @@ jobs:
           if [ -f Podfile ]; then
             echo "Installing CocoaPods dependencies..."
             pod install
+          else
+            echo "No Podfile present. Using project dependencies."
           fi
 
       - name: Build Archive (Unsigned)
+        shell: bash
         run: |
+          set -e -o pipefail
           mkdir -p build/logs
+
+          echo "Starting xcodebuild archive for scheme 3105..."
           xcodebuild \
             -project ThreeOneOSFive.xcodeproj \
             -scheme 3105 \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/ByteExternal.xcarchive \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            archive | tee build/logs/xcodebuild.log
+            archive 2>&1 | tee build/logs/xcodebuild.log || {
+              EXIT_CODE=$?
+              echo "::error::xcodebuild archive failed with exit code $EXIT_CODE"
+              echo "=== Failure log summary (last 100 lines) ==="
+              tail -n 100 build/logs/xcodebuild.log
+              exit $EXIT_CODE
+            }
 
       - name: Package Unsigned IPA
+        shell: bash
         run: |
+          set -e
+
+          if [ ! -d "build/ByteExternal.xcarchive" ]; then
+            echo "::error::Archive build/ByteExternal.xcarchive does not exist!"
+            exit 1
+          fi
+
+          # Find the built application bundle
+          APP_PATH=$(find build/ByteExternal.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "::error::No .app found in build/ByteExternal.xcarchive/Products/Applications/"
+            echo "Contents of archive Products directory:"
+            ls -laR build/ByteExternal.xcarchive/Products/ || true
+            exit 1
+          fi
+
+          echo "Found application bundle at: $APP_PATH"
+
+          # Prepare Payload folder
+          rm -rf build/Payload build/ByteExternal-unsigned.ipa
           mkdir -p build/Payload
-          cp -R build/ByteExternal.xcarchive/Products/Applications/*.app build/Payload/
+
+          # Copy to Payload/ByteExternal.app
+          cp -R "$APP_PATH" build/Payload/ByteExternal.app
+
+          # Package into zip archive
           cd build
-          zip -r ByteExternal-unsigned.ipa Payload
+          zip -r -y ByteExternal-unsigned.ipa Payload
           cd ..
-          ls -lh build/ByteExternal-unsigned.ipa
+
+          # Verify output artifact
+          if [ ! -s "build/ByteExternal-unsigned.ipa" ]; then
+            echo "::error::ByteExternal-unsigned.ipa was not created or is empty!"
+            exit 1
+          fi
+
+          IPA_SIZE=$(du -h build/ByteExternal-unsigned.ipa | cut -f1)
+          echo "Successfully packaged ByteExternal-unsigned.ipa (Size: $IPA_SIZE)"
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ByteExternal-unsigned-ipa
           path: build/ByteExternal-unsigned.ipa
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload Build Logs
@@ -73,4 +121,5 @@ jobs:
         with:
           name: build-logs
           path: build/logs/
+          if-no-files-found: warn
           retention-days: 14

@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Container Discovery Helper
+
+enum ContainerDiscovery {
+    static func containerPath(for bundleID: String) -> String? {
+        ContainerStore.resolveAppContainerPath(bundleID: bundleID)
+    }
+}
+
 // MARK: - Auth & Session Service
 
 class AuthService: ObservableObject {
