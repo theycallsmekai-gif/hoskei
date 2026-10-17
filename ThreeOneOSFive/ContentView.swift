@@ -14,9 +14,9 @@ enum ContainerDiscovery {
 class AuthService: ObservableObject {
     static let shared = AuthService()
     
-    @Published var isAuthenticated: Bool = true
+    @Published var isAuthenticated: Bool = false
     @Published var isOfflineMode: Bool = false
-    @Published var activeLicense: String = "KAI-EXTERNAL-UNLOCKED"
+    @Published var activeLicense: String = ""
     @Published var expirationText: String = "Active (Lifetime VIP)"
     @Published var errorMessage: String?
     @Published var isLockedOut: Bool = false
@@ -29,19 +29,39 @@ class AuthService: ObservableObject {
     
     init() {
         self.deviceFingerprint = UIDevice.current.identifierForVendor?.uuidString ?? "00000000-0000-0000-0000-000000000000"
-        self.activeLicense = "KAI-EXTERNAL-UNLOCKED"
-        self.isAuthenticated = true
+        if let saved = UserDefaults.standard.string(forKey: savedLicenseKey), !saved.isEmpty {
+            self.activeLicense = saved
+            self.isAuthenticated = true
+        } else {
+            self.activeLicense = ""
+            self.isAuthenticated = false
+        }
     }
     
     func login(key: String, completion: @escaping (Bool, String?) -> Void) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            completion(false, "Please enter a valid license key.")
+            completion(false, "Please enter a valid key.")
             return
         }
         
         isConnecting = true
         errorMessage = nil
+        
+        // Accept valid key or direct activation key
+        if trimmed.lowercased() == "crackbykai" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                UserDefaults.standard.set(trimmed, forKey: self.savedLicenseKey)
+                self.activeLicense = trimmed
+                self.isAuthenticated = true
+                self.isOfflineMode = false
+                self.expirationText = "Lifetime VIP"
+                self.isConnecting = false
+                self.errorMessage = nil
+                completion(true, nil)
+            }
+            return
+        }
         
         // Attempt actual network authentication against configured endpoint
         guard let url = URL(string: "\(serverBaseURL)/api/v2/auth/login") else {
@@ -83,16 +103,15 @@ class AuthService: ObservableObject {
                         completion(false, msg)
                         return
                     } else if httpResponse.statusCode == 401 {
-                        let msg = "Invalid license key provided."
+                        let msg = "Invalid key provided."
                         self.errorMessage = msg
                         completion(false, msg)
                         return
                     }
                 }
                 
-                // Network unreachable or server offline (honest failure notification)
                 let errorDesc = error?.localizedDescription ?? "Server offline"
-                let statusMsg = "Remote Auth Server unavailable (\(errorDesc)). You can enter Offline / Developer Mode to inspect and test the UI."
+                let statusMsg = "Authentication server unreachable (\(errorDesc)). You can enter Offline / Developer Mode to inspect and test the UI."
                 self.errorMessage = statusMsg
                 completion(false, statusMsg)
             }
@@ -100,7 +119,7 @@ class AuthService: ObservableObject {
     }
     
     func enterOfflineMode() {
-        self.activeLicense = "DEV-TEST-OFFLINE-KEY"
+        self.activeLicense = "DEV-OFFLINE-VIP"
         self.isAuthenticated = true
         self.isOfflineMode = true
         self.expirationText = "Developer / Offline Mode"
@@ -176,12 +195,10 @@ class SkinPatchService: ObservableObject {
         isProcessing = true
         processingSkinID = skin.id
         
-        // Honest check: verify whether target container exists on device
         let containerPath = ContainerDiscovery.containerPath(for: targetBundle)
         let isCurrentlyApplied = appliedSkinIDs.contains(skin.id)
         
         DispatchQueue.global(qos: .userInitiated).async {
-            // Check if local patch package file exists in documents or bundle
             let docPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Patches/\(skin.patchFileName)").path
             let localPatchExists = docPath != nil && FileManager.default.fileExists(atPath: docPath!)
@@ -200,7 +217,6 @@ class SkinPatchService: ObservableObject {
                         UserDefaults.standard.set(Array(self.appliedSkinIDs), forKey: self.storageKey)
                         completion(true, "\(skin.name) applied to container. (Local package: \(localPatchExists ? "Installed" : "Cloud manifest required")).")
                     } else {
-                        // App container not found on this device
                         completion(false, "App container for '\(targetBundle)' is not installed or accessible on this device. Install the game first.")
                     }
                 }
@@ -224,9 +240,15 @@ struct ContentView: View {
     @State private var showManual = false
 
     var body: some View {
-        authenticatedMainView
-            .preferredColorScheme(.dark)
-            .tint(AppTheme.accent)
+        Group {
+            if authService.isAuthenticated {
+                authenticatedMainView
+            } else {
+                LoginView(authService: authService)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(AppTheme.accent)
     }
     
     private var authenticatedMainView: some View {
@@ -279,48 +301,37 @@ struct LoginView: View {
         ZStack {
             AppTheme.pageBackground.ignoresSafeArea()
             
-            // Neon atmospheric glow
-            Circle()
-                .fill(AppTheme.accent.opacity(0.18))
-                .blur(radius: 80)
-                .offset(y: -140)
-            
             ScrollView {
                 VStack(spacing: 24) {
-                    Spacer().frame(height: 36)
+                    Spacer().frame(height: 40)
                     
                     // Brand Header
-                    VStack(spacing: 12) {
-                        AppLogo(size: 96)
+                    VStack(spacing: 14) {
+                        AppLogo(size: 88)
                         
-                        Text("KAI EXTERNAL")
-                            .font(.system(size: 24, weight: .black, design: .rounded))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.white, AppTheme.accentSecondary],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                        Text("Kai Aim")
+                            .font(.system(size: 26, weight: .bold, design: .default))
+                            .foregroundStyle(.white)
+                            .tracking(0.5)
                         
                         Text("Enter your license key to continue")
                             .font(.subheadline)
-                            .foregroundStyle(Color(.lightGray))
+                            .foregroundStyle(Color(white: 0.65))
                     }
                     
                     // Input Card
                     VStack(spacing: 18) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("License Key")
+                            Text("crackbykai")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(AppTheme.accentSecondary)
-                                .textCase(.uppercase)
+                                .foregroundStyle(Color.white)
+                                .textCase(.lowercase)
                             
                             HStack(spacing: 10) {
                                 Image(systemName: "key.fill")
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(Color(white: 0.8))
                                 
-                                TextField("Enter license key", text: $licenseKeyInput)
+                                TextField("crackbykai", text: $licenseKeyInput)
                                     .font(.system(.body, design: .monospaced))
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
@@ -331,7 +342,7 @@ struct LoginView: View {
                                         licenseKeyInput = ""
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Color(white: 0.6))
                                     }
                                 }
                                 
@@ -342,14 +353,14 @@ struct LoginView: View {
                                 } label: {
                                     Image(systemName: "doc.on.clipboard")
                                         .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(AppTheme.accent)
+                                        .foregroundStyle(.white)
                                 }
                             }
                             .padding(14)
-                            .background(AppTheme.cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(Color(white: 0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .strokeBorder(AppTheme.cardBorder, lineWidth: 1)
                             )
                         }
@@ -358,10 +369,10 @@ struct LoginView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(Color.white)
                                     Text(error)
                                         .font(.caption)
-                                        .foregroundStyle(Color(.lightGray))
+                                        .foregroundStyle(Color(white: 0.85))
                                 }
                                 
                                 Button {
@@ -372,16 +383,16 @@ struct LoginView: View {
                                         Text("Continue in Offline / Developer Test Mode")
                                             .font(.caption.weight(.bold))
                                     }
-                                    .foregroundStyle(AppTheme.accentSecondary)
-                                    .padding(.vertical, 6)
+                                    .foregroundStyle(.white)
+                                    .padding(.vertical, 4)
                                 }
                             }
                             .padding(12)
-                            .background(Color(red: 0.14, green: 0.10, blue: 0.05))
+                            .background(Color(white: 0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color.orange.opacity(0.4), lineWidth: 1)
+                                    .strokeBorder(Color(white: 0.35), lineWidth: 1)
                             )
                         }
                         
@@ -389,33 +400,32 @@ struct LoginView: View {
                         Button {
                             handleLogin()
                         } label: {
-                            HStack {
+                            HStack(spacing: 8) {
                                 if authService.isConnecting {
                                     ProgressView()
-                                        .tint(.white)
+                                        .tint(.black)
                                 } else {
                                     Text("AUTHENTICATE DEVICE")
-                                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
                                         .tracking(0.5)
                                     Image(systemName: "arrow.right.circle.fill")
                                         .font(.title3)
                                 }
                             }
                             .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(AppTheme.gradient)
-                            .foregroundStyle(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .shadow(color: AppTheme.accent.opacity(0.4), radius: 12, x: 0, y: 4)
+                            .frame(height: 50)
+                            .background(Color.white)
+                            .foregroundStyle(Color.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(LoginPressableButtonStyle())
                         .disabled(authService.isConnecting)
                     }
                     .padding(20)
                     .background(AppTheme.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .strokeBorder(AppTheme.cardBorder, lineWidth: 1)
                     )
                     
@@ -423,7 +433,7 @@ struct LoginView: View {
                     VStack(spacing: 8) {
                         HStack(spacing: 6) {
                             Image(systemName: "lock.shield.fill")
-                                .foregroundStyle(AppTheme.accentSecondary)
+                                .foregroundStyle(.white)
                             Text("Hardware Device Verification")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
@@ -432,12 +442,12 @@ struct LoginView: View {
                         Text("This hardware fingerprint is used to bind and protect your license key. License will be bound to this device upon activation.")
                             .font(.caption)
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color(white: 0.6))
                             .lineSpacing(2)
                         
                         Text("Fingerprint: \(authService.deviceFingerprint)")
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(Color(.gray))
+                            .foregroundStyle(Color(white: 0.45))
                             .padding(.top, 2)
                     }
                     .padding(.horizontal, 24)
@@ -448,7 +458,7 @@ struct LoginView: View {
                     } label: {
                         Text("Offline / Developer Test Mode")
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(AppTheme.accentSecondary)
+                            .foregroundStyle(Color(white: 0.75))
                     }
                     
                     // Support Link
@@ -459,7 +469,7 @@ struct LoginView: View {
                     } label: {
                         Text("Need assistance or a key?")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color(white: 0.5))
                     }
                 }
                 .padding(.horizontal, 20)
@@ -471,14 +481,14 @@ struct LoginView: View {
     private func handleLogin() {
         let now = Date()
         if now.timeIntervalSince(lastTapTime) < 0.8 {
-            errorMessage = "Spam detected: Do not repeatedly tap login. Please wait."
+            errorMessage = "Please wait a moment before trying again."
             return
         }
         lastTapTime = now
         
         let key = licenseKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            errorMessage = "Please enter a valid license key."
+            errorMessage = "Please enter a valid key."
             return
         }
         
@@ -550,7 +560,7 @@ struct ExternalPatchHubView: View {
                 .padding(.bottom, 100)
             }
             .background(AppTheme.pageBackground.ignoresSafeArea())
-            .navigationTitle("KAI EXTERNAL")
+            .navigationTitle("Kai Aim")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -581,15 +591,15 @@ struct ExternalPatchHubView: View {
             
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("KAI EXTERNAL")
+                    Text("Kai Aim")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(.white)
                     Text("VIP")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(AppTheme.accentSecondary)
-                        .padding(.horizontal, 5)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(AppTheme.accent.opacity(0.2))
+                        .background(Color(white: 0.2))
                         .clipShape(Capsule())
                 }
                 
@@ -599,7 +609,7 @@ struct ExternalPatchHubView: View {
                         .frame(width: 8, height: 8)
                     Text(appState.isSupported ? "Kernel & Sandbox Active" : "Jailed / Enterprise Signing Required")
                         .font(.caption)
-                        .foregroundStyle(Color(.lightGray))
+                        .foregroundStyle(Color(white: 0.65))
                 }
             }
             
@@ -1227,7 +1237,7 @@ struct UserAccountView: View {
                     VStack(spacing: 12) {
                         AppLogo(size: 80)
                         
-                        Text("KAI EXTERNAL VIP")
+                        Text("Kai Aim VIP")
                             .font(.title3.weight(.black))
                             .foregroundStyle(.white)
                         
@@ -1235,7 +1245,7 @@ struct UserAccountView: View {
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 8, height: 8)
-                            Text("Active (Direct Access)")
+                            Text(authService.isOfflineMode ? "Offline / Dev Mode" : "Active (VIP Authenticated)")
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(Color.green)
                         }
@@ -1261,13 +1271,13 @@ struct UserAccountView: View {
                         
                         VStack(spacing: 12) {
                             HStack {
-                                Text("Access Status")
+                                Text("Active Key")
                                     .font(.subheadline)
                                     .foregroundStyle(.white)
                                 Spacer()
-                                Text("Direct Access (No Key Required)")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(Color.green)
+                                Text(authService.activeLicense.isEmpty ? "Direct Access" : authService.activeLicense)
+                                    .font(.system(.caption, design: .monospaced).weight(.bold))
+                                    .foregroundStyle(Color.white)
                             }
                             
                             Divider().background(AppTheme.cardBorder)
@@ -1279,7 +1289,7 @@ struct UserAccountView: View {
                                 Spacer()
                                 Text("1.1.4 (Build 10)")
                                     .font(.system(.subheadline, design: .monospaced))
-                                    .foregroundStyle(AppTheme.accentSecondary)
+                                    .foregroundStyle(Color(white: 0.75))
                             }
                             
                             Divider().background(AppTheme.cardBorder)
@@ -1327,6 +1337,27 @@ struct UserAccountView: View {
                                 UIApplication.shared.open(url)
                             }
                         }
+                        
+                        // Sign Out / Switch Key Button
+                        Button(action: {
+                            authService.logout()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                Text("SIGN OUT / SWITCH KEY")
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(Color(white: 0.12))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(Color(white: 0.25), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)

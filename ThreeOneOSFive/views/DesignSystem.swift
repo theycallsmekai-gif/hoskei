@@ -1,18 +1,18 @@
 import SwiftUI
 
 enum AppTheme {
-    // Exact specification hex colors
-    static let accent = Color(red: 168/255, green: 66/255, blue: 232/255) // #A842E8
-    static let accentSecondary = Color(red: 208/255, green: 98/255, blue: 255/255) // #D062FF
-    static let accentDark = Color(red: 110/255, green: 35/255, blue: 165/255)
+    // Premium black-and-white theme
+    static let accent = Color.white
+    static let accentSecondary = Color(white: 0.85)
+    static let accentDark = Color(white: 0.20)
     
-    static let pageBackground = Color(red: 10/255, green: 10/255, blue: 15/255) // #0A0A0F
-    static let consoleBackground = Color(red: 15/255, green: 15/255, blue: 22/255)
-    static let cardBackground = Color(red: 19/255, green: 19/255, blue: 26/255) // #13131A
-    static let cardBorder = Color(red: 50/255, green: 34/255, blue: 80/255).opacity(0.35) // #322250 @ ~35%
+    static let pageBackground = Color(red: 9/255, green: 9/255, blue: 11/255) // Near-black #09090B
+    static let consoleBackground = Color(red: 14/255, green: 14/255, blue: 16/255)
+    static let cardBackground = Color(red: 18/255, green: 18/255, blue: 20/255) // Modern dark card #121214
+    static let cardBorder = Color(white: 0.28).opacity(0.4) // Subtle gray border
     
     static let gradient = LinearGradient(
-        colors: [accent, accentSecondary],
+        colors: [Color.white, Color(white: 0.82)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
@@ -47,14 +47,14 @@ struct AppCardBorder: View {
 
 struct AppRowIcon: View {
     let systemName: String
-    var tint: Color = AppTheme.accent
+    var tint: Color = Color.white
     var symbolSize: CGFloat = AppTheme.rowIconSize
     var frameSize: CGFloat = AppTheme.rowIconFrame
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(tint.opacity(0.18))
+                .fill(Color(white: 0.16))
             Image(systemName: systemName)
                 .font(.system(size: symbolSize, weight: .semibold))
                 .foregroundStyle(tint)
@@ -73,7 +73,7 @@ struct AppSearchField: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(Color.white)
                 .accessibilityHidden(true)
 
             TextField(prompt, text: $text)
@@ -132,9 +132,9 @@ struct AppLogo: View {
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .strokeBorder(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                .strokeBorder(Color(white: 0.35).opacity(0.6), lineWidth: 1)
         )
-        .shadow(color: AppTheme.accent.opacity(0.35), radius: 8, x: 0, y: 2)
+        .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 2)
         .accessibilityHidden(true)
     }
 }
