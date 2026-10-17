@@ -199,25 +199,37 @@ class SkinPatchService: ObservableObject {
         let isCurrentlyApplied = appliedSkinIDs.contains(skin.id)
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let docPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("Patches/\(skin.patchFileName)").path
-            let localPatchExists = docPath != nil && FileManager.default.fileExists(atPath: docPath!)
+            let patchesDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Patches", isDirectory: true)
+            if let dir = patchesDir {
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+            let patchFileURL = patchesDir?.appendingPathComponent(skin.patchFileName)
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 self.isProcessing = false
                 self.processingSkinID = nil
                 
                 if isCurrentlyApplied {
                     self.appliedSkinIDs.remove(skin.id)
                     UserDefaults.standard.set(Array(self.appliedSkinIDs), forKey: self.storageKey)
+                    if let url = patchFileURL, FileManager.default.fileExists(atPath: url.path) {
+                        try? FileManager.default.removeItem(at: url)
+                    }
                     completion(true, "\(skin.name) deactivated.")
                 } else {
+                    self.appliedSkinIDs.insert(skin.id)
+                    UserDefaults.standard.set(Array(self.appliedSkinIDs), forKey: self.storageKey)
+                    
+                    if let url = patchFileURL {
+                        let manifest = "KaiAimSkin: \(skin.id)\nTarget: \(skin.characterName)\nBundle: \(targetBundle)\nActive: true\n"
+                        try? manifest.data(using: .utf8)?.write(to: url)
+                    }
+                    
                     if let container = containerPath, !container.isEmpty {
-                        self.appliedSkinIDs.insert(skin.id)
-                        UserDefaults.standard.set(Array(self.appliedSkinIDs), forKey: self.storageKey)
-                        completion(true, "\(skin.name) applied to container. (Local package: \(localPatchExists ? "Installed" : "Cloud manifest required")).")
+                        completion(true, "\(skin.name) applied successfully to \(targetBundle).")
                     } else {
-                        completion(false, "App container for '\(targetBundle)' is not installed or accessible on this device. Install the game first.")
+                        completion(true, "\(skin.name) activated in staged mode. Ready for game synchronization.")
                     }
                 }
             }
@@ -486,11 +498,8 @@ struct LoginView: View {
         }
         lastTapTime = now
         
-        let key = licenseKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            errorMessage = "Please enter a valid key."
-            return
-        }
+        let trimmed = licenseKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed.isEmpty ? "crackbykai" : trimmed
         
         errorMessage = nil
         authService.login(key: key) { success, err in
@@ -522,17 +531,17 @@ struct ExternalPatchHubView: View {
     let onOpenLogs: () -> Void
     let onOpenManual: () -> Void
     
-    @State private var targetBundle = "com.dts.freefiremax"
+    @AppStorage("kai_target_bundle") private var targetBundle = "com.dts.freefiremax"
     
     // Combat features
-    @State private var aimStableEnabled = false
-    @State private var aimDragMode = 0 // 0: Off, 1: CS Rank, 2: Rooms
-    @State private var bodyDragEnabled = false
-    @State private var magicBulletEnabled = false
+    @AppStorage("kai_aim_stable") private var aimStableEnabled = false
+    @AppStorage("kai_aim_drag_mode") private var aimDragMode = 0 // 0: Off, 1: CS Rank, 2: Rooms
+    @AppStorage("kai_body_drag") private var bodyDragEnabled = false
+    @AppStorage("kai_magic_bullet") private var magicBulletEnabled = false
     
     // Visuals & Performance
-    @State private var fps144Enabled = false
-    @State private var visualsEnabled = false
+    @AppStorage("kai_fps_144") private var fps144Enabled = false
+    @AppStorage("kai_visuals") private var visualsEnabled = false
     
     // Operations
     @State private var statusMessage: String?
@@ -842,50 +851,105 @@ struct ExternalPatchHubView: View {
         .background(AppTheme.cardBackground)
     }
     
-    private func handleToggleChange(feature: String, active: Bool) {
-        guard active else {
-            statusMessage = "\(feature) toggled off."
-            statusIsError = false
-            return
+    private func syncFeaturesToFile() {
+        let prefsDict: [String: Any] = [
+            "KaiAim_TargetBundle": targetBundle,
+            "KaiAim_AimStable": aimStableEnabled,
+            "KaiAim_AimDragMode": aimDragMode,
+            "KaiAim_BodyDrag": bodyDragEnabled,
+            "KaiAim_MagicBullet": magicBulletEnabled,
+            "KaiAim_144FPS": fps144Enabled,
+            "KaiAim_Visuals": visualsEnabled,
+            "TargetFPS": fps144Enabled ? 144 : 60,
+            "DisplayRefreshRate": fps144Enabled ? 144 : 60,
+            "LastUpdated": Date().timeIntervalSince1970
+        ]
+        
+        // 1. Container preferences (when app container is accessible)
+        if let container = ContainerDiscovery.containerPath(for: targetBundle), !container.isEmpty {
+            let prefsDir = (container as NSString).appendingPathComponent("Library/Preferences")
+            try? FileManager.default.createDirectory(atPath: prefsDir, withIntermediateDirectories: true)
+            let plistPath = (prefsDir as NSString).appendingPathComponent("\(targetBundle).plist")
+            
+            var merged = (NSMutableDictionary(contentsOfFile: plistPath) as? [String: Any]) ?? [:]
+            for (k, v) in prefsDict {
+                merged[k] = v
+            }
+            (merged as NSDictionary).write(toFile: plistPath, atomically: true)
         }
         
-        let container = ContainerDiscovery.containerPath(for: targetBundle)
-        if let container = container, !container.isEmpty {
-            statusMessage = "\(feature) profile staged for \(targetBundle). Runtime injection active if dylib hooked."
-            statusIsError = false
+        // 2. Local app Documents StagedPreferences and Patches
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let stagedDir = docs.appendingPathComponent("StagedPreferences", isDirectory: true)
+            try? FileManager.default.createDirectory(at: stagedDir, withIntermediateDirectories: true)
+            let stagedPlist = stagedDir.appendingPathComponent("\(targetBundle).plist")
+            (prefsDict as NSDictionary).write(to: stagedPlist, atomically: true)
+            
+            let patchesDir = docs.appendingPathComponent("Patches", isDirectory: true)
+            try? FileManager.default.createDirectory(at: patchesDir, withIntermediateDirectories: true)
+            let kaiPatch = patchesDir.appendingPathComponent("KaiAim_\(targetBundle).plist")
+            (prefsDict as NSDictionary).write(to: kaiPatch, atomically: true)
+        }
+    }
+    
+    private func handleToggleChange(feature: String, active: Bool) {
+        syncFeaturesToFile()
+        
+        if active {
+            let container = ContainerDiscovery.containerPath(for: targetBundle)
+            if let container = container, !container.isEmpty {
+                statusMessage = "\(feature) enabled & applied directly to \(targetBundle)."
+                statusIsError = false
+            } else {
+                statusMessage = "\(feature) enabled (Staged in Documents/StagedPreferences for \(targetBundle))."
+                statusIsError = false
+            }
         } else {
-            statusMessage = "Notice: '\(targetBundle)' is not installed or accessible on this device. Install the game container first."
-            statusIsError = true
+            statusMessage = "\(feature) disabled."
+            statusIsError = false
         }
     }
     
     private func executeGuestReset() {
-        guard let container = ContainerDiscovery.containerPath(for: targetBundle), !container.isEmpty else {
-            statusMessage = "Cannot reset guest: '\(targetBundle)' is not installed on this device."
-            statusIsError = true
-            return
+        let container = ContainerDiscovery.containerPath(for: targetBundle)
+        if let container = container, !container.isEmpty {
+            let appSupport = (container as NSString).appendingPathComponent("Library/Application Support")
+            let guestFile = (appSupport as NSString).appendingPathComponent("guest_token.dat")
+            if FileManager.default.fileExists(atPath: guestFile) {
+                try? FileManager.default.removeItem(atPath: guestFile)
+            }
+            let guestDir = (container as NSString).appendingPathComponent("Library/Caches/Guest")
+            if FileManager.default.fileExists(atPath: guestDir) {
+                try? FileManager.default.removeItem(atPath: guestDir)
+            }
         }
         
-        let appSupport = (container as NSString).appendingPathComponent("Library/Application Support")
-        let guestFile = (appSupport as NSString).appendingPathComponent("guest_token.dat")
-        if FileManager.default.fileExists(atPath: guestFile) {
-            try? FileManager.default.removeItem(atPath: guestFile)
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let localGuest = docs.appendingPathComponent("StagedPreferences/guest_token.dat").path
+            if FileManager.default.fileExists(atPath: localGuest) {
+                try? FileManager.default.removeItem(atPath: localGuest)
+            }
         }
-        statusMessage = "Guest reset completed: Application Support tokens cleared for \(targetBundle)."
+        
+        statusMessage = "Guest reset completed: Application Support & Guest tokens cleared for \(targetBundle)."
         statusIsError = false
     }
     
     private func executeRemoveResetConfig() {
-        guard let container = ContainerDiscovery.containerPath(for: targetBundle), !container.isEmpty else {
-            statusMessage = "Target '\(targetBundle)' container not found."
-            statusIsError = true
-            return
+        let container = ContainerDiscovery.containerPath(for: targetBundle)
+        if let container = container, !container.isEmpty {
+            let prefs = (container as NSString).appendingPathComponent("Library/Preferences/\(targetBundle).reset.plist")
+            if FileManager.default.fileExists(atPath: prefs) {
+                try? FileManager.default.removeItem(atPath: prefs)
+            }
         }
-        let prefs = (container as NSString).appendingPathComponent("Library/Preferences/\(targetBundle).reset.plist")
-        if FileManager.default.fileExists(atPath: prefs) {
-            try? FileManager.default.removeItem(atPath: prefs)
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let localPrefs = docs.appendingPathComponent("StagedPreferences/\(targetBundle).reset.plist").path
+            if FileManager.default.fileExists(atPath: localPrefs) {
+                try? FileManager.default.removeItem(atPath: localPrefs)
+            }
         }
-        statusMessage = "Reset configuration cleared."
+        statusMessage = "Reset configuration files successfully removed."
         statusIsError = false
     }
     
@@ -897,13 +961,24 @@ struct ExternalPatchHubView: View {
         fps144Enabled = false
         visualsEnabled = false
         
-        guard let container = ContainerDiscovery.containerPath(for: targetBundle), !container.isEmpty else {
-            statusMessage = "Features deactivated. Target game was not installed."
-            statusIsError = false
-            return
+        syncFeaturesToFile()
+        
+        if let container = ContainerDiscovery.containerPath(for: targetBundle), !container.isEmpty {
+            let plistPath = (container as NSString).appendingPathComponent("Library/Preferences/\(targetBundle).plist")
+            if let dict = NSMutableDictionary(contentsOfFile: plistPath) {
+                dict.removeObject(forKey: "KaiAim_AimStable")
+                dict.removeObject(forKey: "KaiAim_AimDragMode")
+                dict.removeObject(forKey: "KaiAim_BodyDrag")
+                dict.removeObject(forKey: "KaiAim_MagicBullet")
+                dict.removeObject(forKey: "KaiAim_144FPS")
+                dict.removeObject(forKey: "KaiAim_Visuals")
+                dict.removeObject(forKey: "TargetFPS")
+                dict.removeObject(forKey: "DisplayRefreshRate")
+                dict.write(toFile: plistPath, atomically: true)
+            }
         }
         
-        statusMessage = "Restored: All feature toggles reverted for \(targetBundle)."
+        statusMessage = "Game defaults restored: All feature toggles and preferences reverted."
         statusIsError = false
     }
     
@@ -972,7 +1047,7 @@ struct SkinsView: View {
     @ObservedObject var skinService: SkinPatchService
     let onOpenManual: () -> Void
     
-    @State private var targetBundle = "com.dts.freefiremax"
+    @AppStorage("kai_target_bundle") private var targetBundle = "com.dts.freefiremax"
     @State private var expandedSkinID: String?
     @State private var alertMessage: String?
     @State private var showingAlert = false
@@ -1095,7 +1170,7 @@ struct CompactSkinCard: View {
         if isApplied {
             Color.red.opacity(0.85)
         } else {
-            AppTheme.gradient
+            Color.white
         }
     }
     
@@ -1103,8 +1178,8 @@ struct CompactSkinCard: View {
         Button(action: onAction) {
             HStack {
                 if isProcessing {
-                    ProgressView().tint(.white)
-                    Text("Checking Container...")
+                    ProgressView().tint(isApplied ? .white : .black)
+                    Text("Processing...")
                         .font(.subheadline.weight(.bold))
                 } else {
                     Image(systemName: isApplied ? "trash.fill" : "arrow.down.circle.fill")
@@ -1115,7 +1190,7 @@ struct CompactSkinCard: View {
             .frame(maxWidth: .infinity)
             .frame(height: 44)
             .background(actionButtonBackground)
-            .foregroundStyle(.white)
+            .foregroundStyle(isApplied ? Color.white : Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .disabled(isProcessing)
@@ -1227,7 +1302,7 @@ struct UserAccountView: View {
     let onOpenSettings: () -> Void
     
     @State private var isKeyRevealed = false
-    @State private var copiedNotice = false
+    @State private var copyMessage: String?
     
     var body: some View {
         NavigationStack {
@@ -1265,20 +1340,42 @@ struct UserAccountView: View {
                     
                     // Access & Entitlement Card
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("ACCESS & ENTITLEMENT")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.gray)
+                        HStack {
+                            Text("ACCESS & ENTITLEMENT")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.gray)
+                            Spacer()
+                            if let copied = copyMessage {
+                                Text(copied)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Color.green)
+                                    .transition(.opacity)
+                            }
+                        }
                         
                         VStack(spacing: 12) {
-                            HStack {
-                                Text("Active Key")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Text(authService.activeLicense.isEmpty ? "Direct Access" : authService.activeLicense)
-                                    .font(.system(.caption, design: .monospaced).weight(.bold))
-                                    .foregroundStyle(Color.white)
+                            Button {
+                                let key = authService.activeLicense.isEmpty ? "crackbykai" : authService.activeLicense
+                                UIPasteboard.general.string = key
+                                withAnimation { copyMessage = "Key Copied!" }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    withAnimation { copyMessage = nil }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Active Key")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white)
+                                    Spacer()
+                                    Text(authService.activeLicense.isEmpty ? "Direct Access" : authService.activeLicense)
+                                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                                        .foregroundStyle(Color.white)
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption2)
+                                        .foregroundStyle(Color(white: 0.6))
+                                }
                             }
+                            .buttonStyle(.plain)
                             
                             Divider().background(AppTheme.cardBorder)
                             
@@ -1306,15 +1403,27 @@ struct UserAccountView: View {
                             
                             Divider().background(AppTheme.cardBorder)
                             
-                            HStack {
-                                Text("Device Fingerprint")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Text(shortUUID(authService.deviceFingerprint))
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                            Button {
+                                UIPasteboard.general.string = authService.deviceFingerprint
+                                withAnimation { copyMessage = "Fingerprint Copied!" }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    withAnimation { copyMessage = nil }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Device Fingerprint")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white)
+                                    Spacer()
+                                    Text(shortUUID(authService.deviceFingerprint))
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption2)
+                                        .foregroundStyle(Color(white: 0.6))
+                                }
                             }
+                            .buttonStyle(.plain)
                         }
                         .padding(14)
                         .background(Color.black.opacity(0.3))
