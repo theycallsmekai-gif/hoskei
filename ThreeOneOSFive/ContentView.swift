@@ -14,9 +14,9 @@ enum ContainerDiscovery {
 class AuthService: ObservableObject {
     static let shared = AuthService()
     
-    @Published var isAuthenticated: Bool = false
+    @Published var isAuthenticated: Bool = true
     @Published var isOfflineMode: Bool = false
-    @Published var activeLicense: String = ""
+    @Published var activeLicense: String = "KAI-EXTERNAL-UNLOCKED"
     @Published var expirationText: String = "Active (Lifetime VIP)"
     @Published var errorMessage: String?
     @Published var isLockedOut: Bool = false
@@ -29,10 +29,8 @@ class AuthService: ObservableObject {
     
     init() {
         self.deviceFingerprint = UIDevice.current.identifierForVendor?.uuidString ?? "00000000-0000-0000-0000-000000000000"
-        if let saved = UserDefaults.standard.string(forKey: savedLicenseKey), !saved.isEmpty {
-            self.activeLicense = saved
-            self.isAuthenticated = true
-        }
+        self.activeLicense = "KAI-EXTERNAL-UNLOCKED"
+        self.isAuthenticated = true
     }
     
     func login(key: String, completion: @escaping (Bool, String?) -> Void) {
@@ -226,15 +224,9 @@ struct ContentView: View {
     @State private var showManual = false
 
     var body: some View {
-        Group {
-            if authService.isAuthenticated {
-                authenticatedMainView
-            } else {
-                LoginView(authService: authService)
-            }
-        }
-        .preferredColorScheme(.dark)
-        .tint(AppTheme.accent)
+        authenticatedMainView
+            .preferredColorScheme(.dark)
+            .tint(AppTheme.accent)
     }
     
     private var authenticatedMainView: some View {
@@ -301,7 +293,7 @@ struct LoginView: View {
                     VStack(spacing: 12) {
                         AppLogo(size: 96)
                         
-                        Text("BYTE IOS EXTERNAL")
+                        Text("KAI EXTERNAL")
                             .font(.system(size: 24, weight: .black, design: .rounded))
                             .foregroundStyle(
                                 LinearGradient(
@@ -558,7 +550,7 @@ struct ExternalPatchHubView: View {
                 .padding(.bottom, 100)
             }
             .background(AppTheme.pageBackground.ignoresSafeArea())
-            .navigationTitle("EXTERNAL FEATURES")
+            .navigationTitle("KAI EXTERNAL")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -589,18 +581,16 @@ struct ExternalPatchHubView: View {
             
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("BYTE EXTERNAL VIP")
+                    Text("KAI EXTERNAL")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(.white)
-                    if authService.isOfflineMode {
-                        Text("TEST")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.2))
-                            .clipShape(Capsule())
-                    }
+                    Text("VIP")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(AppTheme.accentSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(AppTheme.accent.opacity(0.2))
+                        .clipShape(Capsule())
                 }
                 
                 HStack(spacing: 6) {
@@ -1237,21 +1227,21 @@ struct UserAccountView: View {
                     VStack(spacing: 12) {
                         AppLogo(size: 80)
                         
-                        Text("BYTE IOS VIP")
+                        Text("KAI EXTERNAL VIP")
                             .font(.title3.weight(.black))
                             .foregroundStyle(.white)
                         
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(authService.isOfflineMode ? Color.orange : Color.green)
+                                .fill(Color.green)
                                 .frame(width: 8, height: 8)
-                            Text(authService.expirationText)
+                            Text("Active (Direct Access)")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(authService.isOfflineMode ? Color.orange : Color.green)
+                                .foregroundStyle(Color.green)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
-                        .background((authService.isOfflineMode ? Color.orange : Color.green).opacity(0.15))
+                        .background(Color.green.opacity(0.15))
                         .clipShape(Capsule())
                     }
                     .frame(maxWidth: .infinity)
@@ -1263,39 +1253,33 @@ struct UserAccountView: View {
                             .strokeBorder(AppTheme.cardBorder, lineWidth: 1)
                     )
                     
-                    // License Information Card
+                    // Access & Entitlement Card
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("LICENSE & ENTITLEMENT")
+                        Text("ACCESS & ENTITLEMENT")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(Color(.gray))
+                            .foregroundStyle(Color.gray)
                         
                         VStack(spacing: 12) {
                             HStack {
-                                Text("License Key")
+                                Text("Access Status")
                                     .font(.subheadline)
                                     .foregroundStyle(.white)
                                 Spacer()
-                                Text(isKeyRevealed ? authService.activeLicense : maskedKey(authService.activeLicense))
+                                Text("Direct Access (No Key Required)")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(Color.green)
+                            }
+                            
+                            Divider().background(AppTheme.cardBorder)
+                            
+                            HStack {
+                                Text("App Version")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Text("1.1.4 (Build 10)")
                                     .font(.system(.subheadline, design: .monospaced))
                                     .foregroundStyle(AppTheme.accentSecondary)
-                                
-                                Button {
-                                    isKeyRevealed.toggle()
-                                } label: {
-                                    Image(systemName: isKeyRevealed ? "eye.slash.fill" : "eye.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Button {
-                                    UIPasteboard.general.string = authService.activeLicense
-                                    copiedNotice = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                        copiedNotice = false
-                                    }
-                                } label: {
-                                    Image(systemName: copiedNotice ? "checkmark" : "doc.on.clipboard")
-                                        .foregroundStyle(AppTheme.accent)
-                                }
                             }
                             
                             Divider().background(AppTheme.cardBorder)
@@ -1344,34 +1328,13 @@ struct UserAccountView: View {
                             }
                         }
                     }
-                    
-                    // Sign Out Action
-                    Button {
-                        authService.logout()
-                    } label: {
-                        HStack {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("SIGN OUT / SWITCH LICENSE")
-                                .font(.subheadline.weight(.heavy))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color.red.opacity(0.18))
-                        .foregroundStyle(.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(Color.red.opacity(0.35), lineWidth: 1)
-                        )
-                    }
-                    .padding(.top, 10)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 100)
             }
             .background(AppTheme.pageBackground.ignoresSafeArea())
-            .navigationTitle("ACCOUNT & LICENSE")
+            .navigationTitle("ACCOUNT")
             .navigationBarTitleDisplayMode(.inline)
         }
     }

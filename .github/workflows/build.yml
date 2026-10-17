@@ -1,4 +1,4 @@
-name: Build ByteExternal
+name: Build Kai External
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
             -scheme 3105 \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath build/ByteExternal.xcarchive \
+            -archivePath build/KaiExternal.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -71,45 +71,54 @@ jobs:
         run: |
           set -e
 
-          if [ ! -d "build/ByteExternal.xcarchive" ]; then
-            echo "::error::Archive build/ByteExternal.xcarchive does not exist!"
+          if [ ! -d "build/KaiExternal.xcarchive" ]; then
+            echo "::error::Archive build/KaiExternal.xcarchive does not exist!"
             exit 1
           fi
 
           # Find the built application bundle
-          APP_PATH=$(find build/ByteExternal.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n 1)
+          APP_PATH=$(find build/KaiExternal.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n 1)
 
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "::error::No .app found in build/ByteExternal.xcarchive/Products/Applications/"
+            echo "::error::No .app found in build/KaiExternal.xcarchive/Products/Applications/"
             echo "Contents of archive Products directory:"
-            ls -laR build/ByteExternal.xcarchive/Products/ || true
+            ls -laR build/KaiExternal.xcarchive/Products/ || true
             exit 1
           fi
 
           echo "Found application bundle at: $APP_PATH"
 
           # Prepare Payload folder
-          rm -rf build/Payload build/ByteExternal-unsigned.ipa
+          rm -rf build/Payload build/KaiExternal-unsigned.ipa build/ByteExternal-unsigned.ipa
           mkdir -p build/Payload
 
-          # Copy to Payload/ByteExternal.app
-          cp -R "$APP_PATH" build/Payload/ByteExternal.app
+          # Copy to Payload/KaiExternal.app
+          cp -R "$APP_PATH" build/Payload/KaiExternal.app
 
           # Package into zip archive
           cd build
-          zip -r -y ByteExternal-unsigned.ipa Payload
+          zip -r -y KaiExternal-unsigned.ipa Payload
+          cp KaiExternal-unsigned.ipa ByteExternal-unsigned.ipa
           cd ..
 
           # Verify output artifact
-          if [ ! -s "build/ByteExternal-unsigned.ipa" ]; then
-            echo "::error::ByteExternal-unsigned.ipa was not created or is empty!"
+          if [ ! -s "build/KaiExternal-unsigned.ipa" ]; then
+            echo "::error::KaiExternal-unsigned.ipa was not created or is empty!"
             exit 1
           fi
 
-          IPA_SIZE=$(du -h build/ByteExternal-unsigned.ipa | cut -f1)
-          echo "Successfully packaged ByteExternal-unsigned.ipa (Size: $IPA_SIZE)"
+          IPA_SIZE=$(du -h build/KaiExternal-unsigned.ipa | cut -f1)
+          echo "Successfully packaged KaiExternal-unsigned.ipa (Size: $IPA_SIZE)"
 
-      - name: Upload Unsigned IPA Artifact
+      - name: Upload Kai External IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaiExternal-unsigned-ipa
+          path: build/KaiExternal-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload ByteExternal Legacy Named IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ByteExternal-unsigned-ipa

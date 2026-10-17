@@ -17,7 +17,7 @@ struct SettingsView: View {
                         AppLogo()
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("BYTE IOS EXTERNAL").font(.headline.weight(.heavy))
+                            Text("Kai External").font(.headline.weight(.heavy))
                             Text(language.text("common.version", "1.1.4 (10)"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
